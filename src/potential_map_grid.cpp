@@ -105,7 +105,7 @@ void PotentialMapGrid::sizeCheck(unsigned int size_x, unsigned int size_y) {
 
 
 inline void PotentialMapGrid::updatePathCell(MapCell* current_cell, MapCell* check_cell,
-        const costmap_2d::Costmap2D& costmap) {
+        const costmap_2d::Costmap2D& costmap, float dist) {
     
     if(check_cell->target_mark) {
         return;
@@ -121,7 +121,7 @@ inline void PotentialMapGrid::updatePathCell(MapCell* current_cell, MapCell* che
         return;
     }
 
-    double new_target_dist = current_cell->target_dist + (double)(check_cost)/150.0 + 1; // TODO values
+    double new_target_dist = current_cell->target_dist + (double)(check_cost)/150.0 + dist; // TODO values
     if (new_target_dist < check_cell->target_dist) {
         check_cell->target_dist = new_target_dist;
         
@@ -242,43 +242,43 @@ void PotentialMapGrid::computeTargetDistance(const costmap_2d::Costmap2D& costma
         
         if(current_cell->cx > 0) {
             auto& nect_cell = getCell(current_cell->cx-1, current_cell->cy);
-            updatePathCell(current_cell, &nect_cell, costmap);
+            updatePathCell(current_cell, &nect_cell, costmap, 1);
         }
         
 
         if(current_cell->cx < last_col) {
             auto& nect_cell = getCell(current_cell->cx+1, current_cell->cy);
-            updatePathCell(current_cell, &nect_cell, costmap);
+            updatePathCell(current_cell, &nect_cell, costmap, 1);
         }
 
         if(current_cell->cy > 0) {
             auto& nect_cell = getCell(current_cell->cx, current_cell->cy-1);
-            updatePathCell(current_cell, &nect_cell, costmap);
+            updatePathCell(current_cell, &nect_cell, costmap, 1);
         }
 
         if(current_cell->cy < last_row) {
            auto& nect_cell = getCell(current_cell->cx, current_cell->cy+1);
-           updatePathCell(current_cell, &nect_cell, costmap);
+           updatePathCell(current_cell, &nect_cell, costmap, 1);
         }
         
         if(current_cell->cx > 0 && current_cell->cy > 0) {
            auto& nect_cell = getCell(current_cell->cx-1, current_cell->cy-1);
-           updatePathCell(current_cell, &nect_cell, costmap);
+           updatePathCell(current_cell, &nect_cell, costmap, std::sqrt(2.0));
         }
         
         if(current_cell->cx > 0 && current_cell->cy < last_row) {
             auto& nect_cell = getCell(current_cell->cx-1, current_cell->cy+1);
-            updatePathCell(current_cell, &nect_cell, costmap);
+            updatePathCell(current_cell, &nect_cell, costmap, std::sqrt(2.0));
         }
         
         if(current_cell->cx < last_col && current_cell->cy > 0) {
            auto& nect_cell = getCell(current_cell->cx+1, current_cell->cy-1);
-           updatePathCell(current_cell, &nect_cell, costmap);
+           updatePathCell(current_cell, &nect_cell, costmap, std::sqrt(2.0));
         }
         
         if(current_cell->cx < last_col && current_cell->cy < last_row) {
            auto& nect_cell = getCell(current_cell->cx+1, current_cell->cy+1);
-           updatePathCell(current_cell, &nect_cell, costmap);
+           updatePathCell(current_cell, &nect_cell, costmap, std::sqrt(2.0));
         }
         
         

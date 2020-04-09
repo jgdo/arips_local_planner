@@ -158,7 +158,7 @@ namespace arips_local_planner{
        * @param  check_cell The cell to be updated
        */
       void updatePathCell(base_local_planner::MapCell* current_cell, base_local_planner::MapCell* check_cell,
-          const costmap_2d::Costmap2D& costmap);
+          const costmap_2d::Costmap2D& costmap, float dist);
 
       /**
        * increase global plan resolution to match that of the costmap by adding points linearly between global plan points

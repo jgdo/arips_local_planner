@@ -36,7 +36,6 @@
 *********************************************************************/
 #include <arips_local_planner/arips_planner.h>
 #include <base_local_planner/goal_functions.h>
-#include <base_local_planner/map_grid_cost_point.h>
 #include <cmath>
 
 //for computing path distance
@@ -45,8 +44,9 @@
 #include <angles/angles.h>
 
 #include <ros/ros.h>
-
-#include <pcl_conversions/pcl_conversions.h>
+#include <tf2/utils.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/point_cloud2_iterator.h>
 
 namespace arips_local_planner {
 void AripsPlanner::reconfigure(AripsPlannerConfig &config)
@@ -156,12 +156,9 @@ AripsPlanner::AripsPlanner(std::string name, base_local_planner::LocalPlannerUti
     private_nh.param("publish_cost_grid_pc", publish_cost_grid_pc_, false);
     map_viz_.initialize(name, planner_util->getGlobalFrame(), boost::bind(&AripsPlanner::getCellCosts, this, _1, _2, _3, _4, _5, _6));
 
-    std::string frame_id;
-    private_nh.param("global_frame_id", frame_id, std::string("odom"));
+    private_nh.param("global_frame_id", frame_id_, std::string("odom"));
 
-    traj_cloud_ = new pcl::PointCloud<base_local_planner::MapGridCostPoint>;
-    traj_cloud_->header.frame_id = frame_id;
-    traj_cloud_pub_.advertise(private_nh, "trajectory_cloud", 1);
+    traj_cloud_pub_ = private_nh.advertise<sensor_msgs::PointCloud2>("trajectory_cloud", 1);
     private_nh.param("publish_traj_pc", publish_traj_pc_, false);
 
     // set up all the cost functions that will be applied in order
@@ -222,7 +219,7 @@ bool AripsPlanner::checkTrajectory(
     // oscillation_costs_.resetOscillationFlags();
     base_local_planner::Trajectory traj;
     geometry_msgs::PoseStamped goal_pose = global_plan_.back();
-    Eigen::Vector3f goal(goal_pose.pose.position.x, goal_pose.pose.position.y, tf::getYaw(goal_pose.pose.orientation));
+    Eigen::Vector3f goal(goal_pose.pose.position.x, goal_pose.pose.position.y, tf2::getYaw(goal_pose.pose.orientation));
     base_local_planner::LocalPlannerLimits limits = planner_util_->getCurrentLimits();
     generator_.initialise(pos,
                           vel,
@@ -243,7 +240,7 @@ bool AripsPlanner::checkTrajectory(
 
 
 void AripsPlanner::updatePlanAndLocalCosts(
-    tf::Stamped<tf::Pose> global_pose,
+    const geometry_msgs::PoseStamped& global_pose,
     const std::vector<geometry_msgs::PoseStamped>& new_plan) {
     global_plan_.resize(new_plan.size());
     for (unsigned int i = 0; i < new_plan.size(); ++i) {
@@ -259,7 +256,7 @@ void AripsPlanner::updatePlanAndLocalCosts(
     // alignment costs
     geometry_msgs::PoseStamped goal_pose = global_plan_.back();
 
-    Eigen::Vector3f pos(global_pose.getOrigin().getX(), global_pose.getOrigin().getY(), tf::getYaw(global_pose.getRotation()));
+    Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
     double sq_dist =
         (pos[0] - goal_pose.pose.position.x) * (pos[0] - goal_pose.pose.position.x) +
         (pos[1] - goal_pose.pose.position.y) * (pos[1] - goal_pose.pose.position.y);
@@ -295,9 +292,9 @@ void AripsPlanner::updatePlanAndLocalCosts(
  * given the current state of the robot, find a good trajectory
  */
 base_local_planner::Trajectory AripsPlanner::findBestPath(
-    tf::Stamped<tf::Pose> global_pose,
-    tf::Stamped<tf::Pose> global_vel,
-    tf::Stamped<tf::Pose>& drive_velocities,
+    const geometry_msgs::PoseStamped& global_pose,
+    const geometry_msgs::PoseStamped& global_vel,
+    geometry_msgs::PoseStamped& drive_velocities,
     std::vector<geometry_msgs::Point> footprint_spec) {
 
     // obstacle_costs_.setFootprint(footprint_spec);
@@ -305,10 +302,10 @@ base_local_planner::Trajectory AripsPlanner::findBestPath(
     //make sure that our configuration doesn't change mid-run
     boost::mutex::scoped_lock l(configuration_mutex_);
 
-    Eigen::Vector3f pos(global_pose.getOrigin().getX(), global_pose.getOrigin().getY(), tf::getYaw(global_pose.getRotation()));
-    Eigen::Vector3f vel(global_vel.getOrigin().getX(), global_vel.getOrigin().getY(), tf::getYaw(global_vel.getRotation()));
+    Eigen::Vector3f pos(global_pose.pose.position.x, global_pose.pose.position.y, tf2::getYaw(global_pose.pose.orientation));
+    Eigen::Vector3f vel(global_vel.pose.position.x, global_vel.pose.position.y, tf2::getYaw(global_vel.pose.orientation));
     geometry_msgs::PoseStamped goal_pose = global_plan_.back();
-    Eigen::Vector3f goal(goal_pose.pose.position.x, goal_pose.pose.position.y, tf::getYaw(goal_pose.pose.orientation));
+    Eigen::Vector3f goal(goal_pose.pose.position.x, goal_pose.pose.position.y, tf2::getYaw(goal_pose.pose.orientation));
     base_local_planner::LocalPlannerLimits limits = planner_util_->getCurrentLimits();
 
     // prepare cost functions and generators for this run
@@ -344,14 +341,28 @@ base_local_planner::Trajectory AripsPlanner::findBestPath(
 
     if(publish_traj_pc_)
     {
-        base_local_planner::MapGridCostPoint pt;
-        traj_cloud_->points.clear();
-        traj_cloud_->width = 0;
-        traj_cloud_->height = 0;
-        std_msgs::Header header;
-        pcl_conversions::fromPCL(traj_cloud_->header, header);
-        header.stamp = ros::Time::now();
-        traj_cloud_->header = pcl_conversions::toPCL(header);
+        sensor_msgs::PointCloud2 traj_cloud;
+        traj_cloud.header.frame_id = frame_id_;
+        traj_cloud.header.stamp = ros::Time::now();
+
+        sensor_msgs::PointCloud2Modifier cloud_mod(traj_cloud);
+        cloud_mod.setPointCloud2Fields(5, "x", 1, sensor_msgs::PointField::FLOAT32,
+                                          "y", 1, sensor_msgs::PointField::FLOAT32,
+                                          "z", 1, sensor_msgs::PointField::FLOAT32,
+                                          "theta", 1, sensor_msgs::PointField::FLOAT32,
+                                          "cost", 1, sensor_msgs::PointField::FLOAT32);
+
+        unsigned int num_points = 0;
+        for(std::vector<base_local_planner::Trajectory>::iterator t=all_explored.begin(); t != all_explored.end(); ++t)
+        {
+            if (t->cost_<0)
+              continue;
+            num_points += t->getPointsSize();
+        }
+
+        cloud_mod.resize(num_points);
+        sensor_msgs::PointCloud2Iterator<float> iter_x(traj_cloud, "x");
+        
         for(std::vector<base_local_planner::Trajectory>::iterator t=all_explored.begin(); t != all_explored.end(); ++t)
         {
             if(t->cost_<0)
@@ -360,15 +371,15 @@ base_local_planner::Trajectory AripsPlanner::findBestPath(
             for(unsigned int i = 0; i < t->getPointsSize(); ++i) {
                 double p_x, p_y, p_th;
                 t->getPoint(i, p_x, p_y, p_th);
-                pt.x=p_x;
-                pt.y=p_y;
-                pt.z=0;
-                pt.path_cost=p_th;
-                pt.total_cost=t->cost_;
-                traj_cloud_->push_back(pt);
+                iter_x[0] = p_x;
+                iter_x[1] = p_y;
+                iter_x[2] = 0.0;
+                iter_x[3] = p_th;
+                iter_x[4] = t->cost_;
+                ++iter_x;
             }
         }
-        traj_cloud_pub_.publish(*traj_cloud_);
+        traj_cloud_pub_.publish(traj_cloud);
     }
 
     // verbose publishing of point clouds
@@ -394,13 +405,20 @@ base_local_planner::Trajectory AripsPlanner::findBestPath(
             vx = 0;
         }
         
-        tf::Vector3 start(vx * 0.15, 0, 0);
-        drive_velocities.setOrigin(start);
-        tf::Matrix3x3 matrix;
-        matrix.setRotation(tf::createQuaternionFromYaw(vth * 0.8));
-        drive_velocities.setBasis(matrix);
+        drive_velocities.pose.position.x = vx * 0.15;
+        drive_velocities.pose.position.y = 0;
+        drive_velocities.pose.position.z = 0;
+        tf2::Quaternion q;
+        q.setRPY(0, 0, vth * 0.8);
+        tf2::convert(q, drive_velocities.pose.orientation);
     } else {
-        drive_velocities.setIdentity();
+        drive_velocities.pose.position.x = 0;
+        drive_velocities.pose.position.y = 0;
+        drive_velocities.pose.position.z = 0;
+        drive_velocities.pose.orientation.w = 1;
+        drive_velocities.pose.orientation.x = 0;
+        drive_velocities.pose.orientation.y = 0;
+        drive_velocities.pose.orientation.z = 0;
     }
     
     //if we don't have a legal trajectory, we'll just command zero

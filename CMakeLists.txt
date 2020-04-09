@@ -16,7 +16,9 @@ find_package(catkin REQUIRED COMPONENTS
   pluginlib
   roscpp
   sensor_msgs
-  tf
+  tf2
+  tf2_geometry_msgs
+  tf2_ros
 )
 
 ## System dependencies are found with CMake's conventions
@@ -110,7 +112,10 @@ generate_dynamic_reconfigure_options(
 catkin_package(
    INCLUDE_DIRS include
    LIBRARIES arips_local_planner
-   CATKIN_DEPENDS base_local_planner costmap_2d dynamic_reconfigure nav_core nav_msgs pluginlib roscpp sensor_msgs tf
+   CATKIN_DEPENDS base_local_planner costmap_2d dynamic_reconfigure nav_core nav_msgs pluginlib 
+   roscpp sensor_msgs 
+   tf2
+   tf2_ros
 #  DEPENDS system_lib
 )
 
